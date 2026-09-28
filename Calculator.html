@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Calculator</title>
+<style>
+:root{
+  --page:#e9edf2;--body:#ffffff;--screen:#eef2f6;--ink:#111a26;--muted:#5c6b7d;
+  --key:#f3f5f8;--key-ink:#111a26;--op:#dbe7ff;--op-ink:#1846b8;--clear:#ffe1dc;--clear-ink:#b3261e;--eq:#1846b8;--eq-ink:#fff;--line:#d3dae3;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--page:#0a0f16;--body:#141c27;--screen:#0d131c;--ink:#f0f4f9;--muted:#8fa0b5;--key:#1e2937;--key-ink:#f0f4f9;--op:#22355c;--op-ink:#a9c4ff;--clear:#4a2422;--clear-ink:#ffb4ab;--eq:#4f83ff;--eq-ink:#0a0f16;--line:#263446}}
+:root[data-theme="dark"]{--page:#0a0f16;--body:#141c27;--screen:#0d131c;--ink:#f0f4f9;--muted:#8fa0b5;--key:#1e2937;--key-ink:#f0f4f9;--op:#22355c;--op-ink:#a9c4ff;--clear:#4a2422;--clear-ink:#ffb4ab;--eq:#4f83ff;--eq-ink:#0a0f16;--line:#263446}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--page);color:var(--ink);font:1rem "Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:grid;place-items:center;padding:1rem}
+.calc{width:100%;max-width:340px;background:var(--body);border:1px solid var(--line);border-radius:20px;padding:1.1rem;box-shadow:0 12px 40px rgba(0,0,0,.15)}
+.screen{background:var(--screen);border-radius:12px;padding:.9rem 1rem;margin-bottom:1rem;text-align:right;min-height:5.6rem;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden}
+.history{color:var(--muted);font-size:.95rem;min-height:1.4rem;word-break:break-all}
+.current{font-size:2.4rem;font-weight:600;line-height:1.2;word-break:break-all;font-variant-numeric:tabular-nums}
+.keys{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem}
+button{font:inherit;font-size:1.3rem;font-weight:600;padding:.9rem 0;border:0;border-radius:12px;background:var(--key);color:var(--key-ink);cursor:pointer;transition:transform .08s}
+button:active{transform:scale(.95)}
+button:focus-visible{outline:3px solid var(--eq);outline-offset:2px}
+button.op{background:var(--op);color:var(--op-ink)}
+button.clear{background:var(--clear);color:var(--clear-ink)}
+button.eq{background:var(--eq);color:var(--eq-ink);grid-row:span 2}
+button.zero{grid-column:span 2}
+.hint{margin:.9rem 0 0;text-align:center;color:var(--muted);font-size:.8rem}
+</style>
+</head>
+<body>
+<main class="calc" aria-label="Calculator">
+  <div class="screen" role="status" aria-live="polite">
+    <div class="history" id="history"></div>
+    <div class="current" id="current">0</div>
+  </div>
+  <div class="keys" id="keys"></div>
+  <p class="hint">Keyboard works too: digits, + - * /, Enter, Backspace, Esc</p>
+</main>
+
+<script>
+// ---- 1. Describe every button in an array, then build them with a loop ----
+const layout = [
+  { label: "C",  value: "clear",  cls: "clear" },
+  { label: "⌫",  value: "back",   cls: "clear" },
+  { label: "%",  value: "percent",cls: "op" },
+  { label: "÷",  value: "/",      cls: "op" },
+  { label: "7", value: "7" }, { label: "8", value: "8" }, { label: "9", value: "9" },
+  { label: "×",  value: "*",      cls: "op" },
+  { label: "4", value: "4" }, { label: "5", value: "5" }, { label: "6", value: "6" },
+  { label: "−",  value: "-",      cls: "op" },
+  { label: "1", value: "1" }, { label: "2", value: "2" }, { label: "3", value: "3" },
+  { label: "+",  value: "+",      cls: "op" },
+  { label: "0", value: "0", cls: "zero" },
+  { label: ".", value: "." },
+  { label: "=",  value: "=",      cls: "eq" }
+];
+
+const keysEl = document.getElementById("keys");
+const currentEl = document.getElementById("current");
+const historyEl = document.getElementById("history");
+
+for (let i = 0; i < layout.length; i++) {
+  const btn = document.createElement("button");
+  btn.textContent = layout[i].label;
+  btn.dataset.value = layout[i].value;
+  btn.setAttribute("aria-label", labelFor(layout[i]));
+  if (layout[i].cls) btn.className = layout[i].cls;
+  keysEl.appendChild(btn);
+}
+
+function labelFor(item) {
+  const names = { "/": "divide", "*": "multiply", "-": "subtract", "+": "add",
+                  "=": "equals", clear: "clear", back: "backspace", percent: "percent", ".": "decimal point" };
+  return names[item.value] || item.value;
+}
+
+// ---- 2. Calculator state ----
+let display = "0";     // number being typed
+let stored = null;     // first number
+let operator = null;   // pending operator
+let justEvaluated = false;
+
+// ---- 3. Math using if-else ----
+function calculate(a, op, b) {
+  if (op === "+") return a + b;
+  else if (op === "-") return a - b;
+  else if (op === "*") return a * b;
+  else if (op === "/") {
+    if (b === 0) return null;   // division by zero
+    return a / b;
+  }
+  return b;
+}
+
+function format(num) {
+  // Round to avoid 0.1 + 0.2 = 0.30000000000000004
+  return String(parseFloat(num.toPrecision(12)));
+}
+
+const symbols = { "+": "+", "-": "−", "*": "×", "/": "÷" };
+
+function render() {
+  currentEl.textContent = display;
+  if (stored !== null && operator) historyEl.textContent = format(stored) + " " + symbols[operator];
+}
+
+// ---- 4. Handle input ----
+function inputDigit(d) {
+  if (justEvaluated) { display = "0"; justEvaluated = false; }
+  if (display === "Error") display = "0";
+  if (display === "0") display = d;
+  else if (display.length < 14) display += d;
+}
+
+function inputDot() {
+  if (justEvaluated || display === "Error") { display = "0"; justEvaluated = false; }
+  if (!display.includes(".")) display += ".";
+}
+
+function chooseOperator(op) {
+  if (display === "Error") return;
+  // Chain: 2 + 3 + ... computes 2 + 3 first
+  if (operator && !justEvaluated && stored !== null) {
+    const result = calculate(stored, operator, parseFloat(display));
+    if (result === null) return showError();
+    stored = result;
+  } else {
+    stored = parseFloat(display);
+  }
+  operator = op;
+  display = format(stored);
+  justEvaluated = true;   // next digit starts a new number
+  render();
+}
+
+function equals() {
+  if (operator === null || stored === null || display === "Error") return;
+  const b = parseFloat(display);
+  const result = calculate(stored, operator, b);
+  if (result === null) return showError();
+  historyEl.textContent = format(stored) + " " + symbols[operator] + " " + format(b) + " =";
+  display = format(result);
+  stored = null;
+  operator = null;
+  justEvaluated = true;
+  render();
+}
+
+function showError() {
+  display = "Error";
+  historyEl.textContent = "Cannot divide by zero";
+  stored = null; operator = null; justEvaluated = true;
+  render();
+}
+
+function clearAll() {
+  display = "0"; stored = null; operator = null; justEvaluated = false;
+  historyEl.textContent = "";
+  render();
+}
+
+function backspace() {
+  if (justEvaluated || display === "Error") return;
+  display = display.length > 1 ? display.slice(0, -1) : "0";
+  render();
+}
+
+function percent() {
+  if (display === "Error") return;
+  display = format(parseFloat(display) / 100);
+  render();
+}
+
+function handle(value) {
+  if (value >= "0" && value <= "9" && value.length === 1) { inputDigit(value); render(); }
+  else if (value === ".") { inputDot(); render(); }
+  else if (value === "+" || value === "-" || value === "*" || value === "/") chooseOperator(value);
+  else if (value === "=") equals();
+  else if (value === "clear") clearAll();
+  else if (value === "back") backspace();
+  else if (value === "percent") percent();
+}
+
+// ---- 5. Event listeners ----
+keysEl.addEventListener("click", function (e) {
+  const btn = e.target.closest("button");
+  if (btn) handle(btn.dataset.value);
+});
+
+document.addEventListener("keydown", function (e) {
+  const k = e.key;
+  if (k === "Enter" || k === "=") { e.preventDefault(); handle("="); }
+  else if (k === "Backspace") handle("back");
+  else if (k === "Escape") handle("clear");
+  else if (k === "%") handle("percent");
+  else if ("0123456789.+-*/".includes(k) && k.length === 1) handle(k);
+});
+
+render();
+</script>
+</body>
+</html>
